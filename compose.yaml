@@ -1,0 +1,7 @@
+services:
+  app-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aws-big-data-devops:latest
+    container_name: aws-big-data-devops-tests
