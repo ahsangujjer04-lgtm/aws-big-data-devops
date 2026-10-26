@@ -1,3 +1,4 @@
+
 name: Python CI
 
 on:
@@ -32,14 +33,4 @@ jobs:
           python -m py_compile app/producer.py
           python -m py_compile app/process_events.py
           python -m py_compile app/upload_to_s3.py
-
-Save with **Ctrl+O**, press **Enter**, then exit with **Ctrl+X**.
-
-### 3. Test the workflow commands locally
-
-Run:
-
-```bash
-python -m pip install -r requirements.txt
-python -m unittest discover -s app/tests -v
-python -m py_compile app/producer.py app/process_events.py app/upload_to_s3.py
+          python -m py_compile app/analytics.py
