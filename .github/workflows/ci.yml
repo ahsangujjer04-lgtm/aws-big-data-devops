@@ -11,16 +11,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Run automated tests
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run unit tests
         run: python -m unittest discover -s app/tests -v
 
-      - name: Generate sample events
-        run: python app/producer.py
+      - name: Check Python syntax
+        run: |
+          python -m py_compile app/producer.py
+          python -m py_compile app/process_events.py
+          python -m py_compile app/upload_to_s3.py
+
+Save with **Ctrl+O**, press **Enter**, then exit with **Ctrl+X**.
+
+### 3. Test the workflow commands locally
+
+Run:
+
+```bash
+python -m pip install -r requirements.txt
+python -m unittest discover -s app/tests -v
+python -m py_compile app/producer.py app/process_events.py app/upload_to_s3.py
