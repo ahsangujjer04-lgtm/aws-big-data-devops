@@ -1,4 +1,3 @@
-
 name: Python CI
 
 on:
@@ -34,6 +33,6 @@ jobs:
           python -m py_compile app/process_events.py
           python -m py_compile app/upload_to_s3.py
           python -m py_compile app/analytics.py
-          
-        - name: Build Docker image
-          run: docker build -t aws-big-data-devops:latest .
+
+      - name: Build Docker image
+        run: docker build -t aws-big-data-devops:latest .
