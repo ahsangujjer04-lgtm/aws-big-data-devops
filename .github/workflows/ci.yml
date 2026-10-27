@@ -1,4 +1,4 @@
-name: Python CI
+name: Python CI and ECR CD
 
 on:
   push:
@@ -6,8 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: aws-big-data-devops
+  ECR_REGISTRY: 060502546838.dkr.ecr.us-east-1.amazonaws.com
+
 jobs:
-  test:
+  test-and-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -36,3 +45,29 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t aws-big-data-devops:latest .
+
+      - name: Configure AWS credentials using OIDC
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::060502546838:role/GitHubActionsECRPushRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag aws-big-data-devops:latest \
+            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          docker tag aws-big-data-devops:latest \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA
+
+      - name: Push Docker image to Amazon ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA
