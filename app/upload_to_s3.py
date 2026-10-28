@@ -4,11 +4,14 @@ from datetime import datetime, timezone
 
 import boto3
 
-from producer import generate_event
+try:
+    from .producer import generate_event
+except ImportError:
+    from producer import generate_event
 
 
 def upload_events():
-    """Generate sample events and upload them to Amazon S3."""
+    """Generate sample events, upload them to S3, and return the object key."""
 
     bucket_name = os.getenv("BUCKET_NAME")
     region = os.getenv("AWS_REGION", "us-east-1")
@@ -18,13 +21,11 @@ def upload_events():
             "BUCKET_NAME is not set. Please configure your S3 bucket name."
         )
 
-    # Generate five events in JSON Lines format.
     events = [generate_event() for _ in range(5)]
 
     content = "\n".join(json.dumps(event) for event in events) + "\n"
 
-    # Generate a unique object key for each upload.
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     object_key = f"raw/events-{timestamp}.jsonl"
 
     s3 = boto3.client("s3", region_name=region)
@@ -40,6 +41,8 @@ def upload_events():
     print(f"Bucket: {bucket_name}")
     print(f"Object key: {object_key}")
     print(f"S3 URI: s3://{bucket_name}/{object_key}")
+
+    return object_key
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ VALID_EVENT_TYPES = {
 
 
 def validate_event(event):
-    """Return (is_valid, reason) for an event."""
+    """Validate a single event and return (is_valid, reason)."""
 
     if not isinstance(event, dict):
         return False, "Event must be a JSON object"
@@ -33,38 +33,34 @@ def validate_event(event):
     if missing_fields:
         return False, f"Missing fields: {', '.join(sorted(missing_fields))}"
 
-    if not isinstance(event["event_id"], str) or not event["event_id"].strip():
-        return False, "event_id must be a non-empty string"
+    for field in ("event_id", "user_id", "product_id", "currency"):
+        if not isinstance(event[field], str) or not event[field].strip():
+            return False, f"{field} must be a non-empty string"
 
     if event["event_type"] not in VALID_EVENT_TYPES:
         return False, "Invalid event_type"
 
-    if not isinstance(event["user_id"], str) or not event["user_id"].strip():
-        return False, "user_id must be a non-empty string"
-
-    if not isinstance(event["product_id"], str) or not event["product_id"].strip():
-        return False, "product_id must be a non-empty string"
-
+    amount = event["amount"]
     if (
-        isinstance(event["amount"], bool)
-        or not isinstance(event["amount"], (int, float))
-        or event["amount"] < 0
+        isinstance(amount, bool)
+        or not isinstance(amount, (int, float))
+        or amount < 0
     ):
         return False, "amount must be a non-negative number"
 
-    if not isinstance(event["currency"], str) or not event["currency"].strip():
-        return False, "currency must be a non-empty string"
+    if isinstance(amount, float) and not __import__("math").isfinite(amount):
+        return False, "amount must be finite"
 
     try:
         datetime.fromisoformat(event["timestamp"].replace("Z", "+00:00"))
-    except (AttributeError, TypeError, ValueError):
-        return False, "timestamp must be a valid ISO 8601 timestamp"
+    except (ValueError, AttributeError, TypeError):
+        return False, "Invalid timestamp"
 
     return True, "Valid"
 
 
 def process_events(events):
-    """Separate valid events from rejected records."""
+    """Separate valid events from rejected events."""
 
     valid_events = []
     rejected_events = []
@@ -85,14 +81,14 @@ def process_events(events):
 
 
 def read_s3_events(s3, bucket_name, object_key):
-    """Read JSON Lines from an S3 object."""
+    """Read JSON Lines events from an S3 object."""
 
     response = s3.get_object(Bucket=bucket_name, Key=object_key)
     content = response["Body"].read().decode("utf-8")
 
     events = []
 
-    for line_number, line in enumerate(content.splitlines(), start=1):
+    for line in content.splitlines():
         if not line.strip():
             continue
 
@@ -105,12 +101,11 @@ def read_s3_events(s3, bucket_name, object_key):
 
 
 def upload_jsonl(s3, bucket_name, object_key, records):
-    """Upload records as JSON Lines."""
+    """Upload records to S3 in JSON Lines format."""
 
-    content = "".join(
-        json.dumps(record, ensure_ascii=False) + "\n"
-        for record in records
-    )
+    content = "\n".join(
+        json.dumps(record, ensure_ascii=False) for record in records
+    ) + "\n"
 
     s3.put_object(
         Bucket=bucket_name,
@@ -120,25 +115,24 @@ def upload_jsonl(s3, bucket_name, object_key, records):
     )
 
 
-def main():
-    bucket_name = os.getenv("BUCKET_NAME")
-    region = os.getenv("AWS_REGION", "us-east-1")
-    source_key = os.getenv("SOURCE_KEY")
+def process_s3_events(bucket_name, source_key, region="us-east-1"):
+    """Process an S3 object and return output keys and record counts."""
 
     if not bucket_name:
-        raise ValueError("BUCKET_NAME environment variable is required")
+        raise ValueError("bucket_name is required")
 
     if not source_key:
-        raise ValueError(
-            "SOURCE_KEY is required, for example raw/events-20261026T094547Z.jsonl"
-        )
+        raise ValueError("source_key is required")
 
     s3 = boto3.client("s3", region_name=region)
 
     events = read_s3_events(s3, bucket_name, source_key)
     valid_events, rejected_events = process_events(events)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+    processed_key = None
+    rejected_key = None
 
     if valid_events:
         processed_key = f"processed/events-{timestamp}.jsonl"
@@ -157,6 +151,30 @@ def main():
     print(f"Input records: {len(events)}")
     print(f"Valid records: {len(valid_events)}")
     print(f"Rejected records: {len(rejected_events)}")
+
+    return {
+        "processed_key": processed_key,
+        "rejected_key": rejected_key,
+        "input_count": len(events),
+        "valid_count": len(valid_events),
+        "rejected_count": len(rejected_events),
+    }
+
+
+def main():
+    bucket_name = os.getenv("BUCKET_NAME")
+    region = os.getenv("AWS_REGION", "us-east-1")
+    source_key = os.getenv("SOURCE_KEY")
+
+    if not bucket_name:
+        raise ValueError("BUCKET_NAME environment variable is required")
+
+    if not source_key:
+        raise ValueError(
+            "SOURCE_KEY is required, for example raw/events-example.jsonl"
+        )
+
+    process_s3_events(bucket_name, source_key, region)
 
 
 if __name__ == "__main__":

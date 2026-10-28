@@ -5,3 +5,16 @@ services:
       dockerfile: Dockerfile
     image: aws-big-data-devops:latest
     container_name: aws-big-data-devops-tests
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aws-big-data-devops:latest
+    environment:
+      AWS_PROFILE: devops-learning
+      AWS_REGION: us-east-1
+      BUCKET_NAME: aws-big-data-devops-events-c285e476
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
+    command: ["python", "-m", "app.run_pipeline"]

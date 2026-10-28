@@ -46,18 +46,16 @@ def calculate_analytics(events):
     }
 
 
-def main():
-    bucket_name = os.getenv("BUCKET_NAME")
-    region = os.getenv("AWS_REGION", "us-east-1")
-    source_key = os.getenv("SOURCE_KEY")
+def generate_analytics_report(
+    bucket_name, source_key, region="us-east-1"
+):
+    """Read processed events from S3, generate a report, and save it."""
 
     if not bucket_name:
-        raise ValueError("BUCKET_NAME environment variable is required")
+        raise ValueError("bucket_name is required")
 
     if not source_key:
-        raise ValueError(
-            "SOURCE_KEY must identify a processed JSONL file in S3"
-        )
+        raise ValueError("source_key is required")
 
     s3 = boto3.client("s3", region_name=region)
 
@@ -76,11 +74,10 @@ def main():
 
     report = calculate_analytics(events)
 
-    report_key = (
-        "analytics/report-"
-        + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        + ".json"
+    timestamp = datetime.now(timezone.utc).strftime(
+        "%Y%m%dT%H%M%S%fZ"
     )
+    report_key = f"analytics/report-{timestamp}.json"
 
     s3.put_object(
         Bucket=bucket_name,
@@ -91,6 +88,29 @@ def main():
 
     print(json.dumps(report, indent=2))
     print(f"\nReport saved to s3://{bucket_name}/{report_key}")
+
+    return {
+        "report_key": report_key,
+        "report": report,
+    }
+
+
+def main():
+    bucket_name = os.getenv("BUCKET_NAME")
+    region = os.getenv("AWS_REGION", "us-east-1")
+    source_key = os.getenv("SOURCE_KEY")
+
+    if not bucket_name:
+        raise ValueError(
+            "BUCKET_NAME environment variable is required"
+        )
+
+    if not source_key:
+        raise ValueError(
+            "SOURCE_KEY must identify a processed JSONL file in S3"
+        )
+
+    generate_analytics_report(bucket_name, source_key, region)
 
 
 if __name__ == "__main__":
