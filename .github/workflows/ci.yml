@@ -14,6 +14,7 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: aws-big-data-devops
   ECR_REGISTRY: 060502546838.dkr.ecr.us-east-1.amazonaws.com
+  EC2_INSTANCE_ID: i-0487da2ac059d7712
 
 jobs:
   test-and-build:
@@ -61,13 +62,75 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker tag aws-big-data-devops:latest \
-            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+            "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
 
           docker tag aws-big-data-devops:latest \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA
+            "$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
 
       - name: Push Docker image to Amazon ECR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+
+      - name: Deploy and test container on EC2 through SSM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+
+          echo "Deploying image: $IMAGE"
+
+          PARAMETERS=$(jq -n --arg image "$IMAGE" '{
+            commands: [
+              "set -eu",
+              "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 060502546838.dkr.ecr.us-east-1.amazonaws.com",
+              ("docker pull " + $image),
+              ("docker run --rm " + $image),
+              "docker logout 060502546838.dkr.ecr.us-east-1.amazonaws.com"
+            ]
+          }')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "$PARAMETERS" \
+            --comment "Test Big Data DevOps image for commit $GITHUB_SHA" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "SSM command ID: $COMMAND_ID"
+
+          for attempt in $(seq 1 60); do
+            RESULT=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query '[Status,StandardOutputContent,StandardErrorContent]' \
+              --output json 2>/dev/null) || {
+                sleep 5
+                continue
+              }
+
+            STATUS=$(echo "$RESULT" | jq -r '.[0]')
+
+            echo "Remote command status: $STATUS"
+
+            if [[ "$STATUS" == "Success" ]]; then
+              echo "$RESULT" | jq -r '.[1]'
+              echo "Remote container tests completed successfully."
+              exit 0
+            fi
+
+            if [[ "$STATUS" == "Failed" || "$STATUS" == "TimedOut" || "$STATUS" == "Cancelled" || "$STATUS" == "Cancelling" ]]; then
+              echo "$RESULT" | jq -r '"Standard output:\n" + .[1] + "\nStandard error:\n" + .[2]'
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          echo "Timed out waiting for the SSM command to finish."
+          exit 1
+
